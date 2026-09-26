@@ -157,22 +157,24 @@ lock_acquire_bounded() {  # <lock>
 # The per-prompt block counter. Devin keeps invoking this hook for every
 # block-driven continuation, so count is a real loop bound even though the
 # payload carries no loop_count of its own.
-loops_next() {  # -> sets LOOPS_COUNT and persists it
-  local session prompt count=0 tmp status=0
+loops_prepare() {
+  local session prompt count=0
   session=$(sed -n '1s/^session=//p' "$LOOPS_FILE" 2>/dev/null || true)
   prompt=$(sed -n '2s/^prompt=//p' "$LOOPS_FILE" 2>/dev/null || true)
   count=$(sed -n '3s/^count=//p' "$LOOPS_FILE" 2>/dev/null || true)
   case "$count" in ''|*[!0-9]*) count=0 ;; esac
   [ "$session" = "$SESSION_ID" ] && [ "$prompt" = "$PROMPT_ID" ] || count=0
-  count=$((count + 1))
-  tmp="$LOOPS_FILE.tmp.$$"
+  LOOPS_COUNT=$((count + 1))
+}
+
+loops_next() {
+  local tmp="$LOOPS_FILE.tmp.$$" status=0
   [ ! -d "$LOOPS_FILE" ] || return 1
-  printf 'session=%s\nprompt=%s\ncount=%s\n' "$SESSION_ID" "$PROMPT_ID" "$count" > "$tmp" 2>/dev/null \
+  printf 'session=%s\nprompt=%s\ncount=%s\n' "$SESSION_ID" "$PROMPT_ID" "$LOOPS_COUNT" > "$tmp" 2>/dev/null \
     && mv -f "$tmp" "$LOOPS_FILE" 2>/dev/null \
     || status=1
   rm -f "$tmp" 2>/dev/null || true
   [ "$status" -eq 0 ] || return 1
-  LOOPS_COUNT=$count
 }
 
 # Emit exactly one block decision and stop, bounded by the per-prompt loop
@@ -185,10 +187,7 @@ emit_block() {  # <kind> <body> [reset-budget]
     fm_lock_release "$OWNER_LOCK"
     exit 0
   fi
-  loops_next || {
-    fm_lock_release "$OWNER_LOCK"
-    exit 0
-  }
+  loops_prepare
   count=$LOOPS_COUNT
   [ "$count" -gt "$LOOP_CEILING" ] && {
     fm_lock_release "$OWNER_LOCK"
@@ -210,6 +209,10 @@ emit_block() {  # <kind> <body> [reset-budget]
     fm_lock_release "$OWNER_LOCK"
     exit 0
   fi
+  loops_next || {
+    fm_lock_release "$OWNER_LOCK"
+    exit 0
+  }
   printf '%s\n' "$response" || true
   fm_lock_release "$OWNER_LOCK"
   exit 0
@@ -270,10 +273,7 @@ emit_repair_followup() {  # <reason> <arm-tail> <attempt>
 $arm_tail
 
 $reason"
-  loops_next || {
-    fm_lock_release "$OWNER_LOCK"
-    exit 0
-  }
+  loops_prepare
   if [ "$LOOPS_COUNT" -gt "$LOOP_CEILING" ]; then
     fm_lock_release "$OWNER_LOCK"
     exit 0
@@ -290,6 +290,10 @@ $reason"
     exit 0
   }
   budget_write "$count" || {
+    fm_lock_release "$OWNER_LOCK"
+    exit 0
+  }
+  loops_next || {
     fm_lock_release "$OWNER_LOCK"
     exit 0
   }

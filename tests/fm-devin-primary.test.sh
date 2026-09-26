@@ -422,6 +422,34 @@ test_park_loop_counter_fails_closed_when_state_is_a_directory() {
   pass "devin park: an unpersistable loop counter fails closed"
 }
 
+test_park_actionable_wake_does_not_count_when_budget_reset_fails() {
+  local dir out count
+  dir=$(make_primary_dir "$TMP_ROOT/park-budget-reset-fails")
+  : > "$dir/state/task1.meta"
+  mkdir "$dir/state/.turnend-devin-blocks"
+  write_arm_fixture "$dir" actionable
+  write_pane_fixture "$dir" idle
+  out=$(run_park "$dir" p-1 '' "FM_DEVIN_PANE_READ=$dir/fixture/pane-read")
+  [ -z "$out" ] || fail "an actionable wake with an unresettable budget must emit nothing, got: $out"
+  count=$(sed -n '3s/^count=//p' "$dir/state/.devin-park-loops" 2>/dev/null)
+  [ -z "$count" ] || fail "a suppressed actionable wake must not consume a loop count, got: $count"
+  pass "devin park: a failed budget reset leaves the loop count unchanged"
+}
+
+test_park_repair_does_not_count_when_budget_write_fails() {
+  local dir out count
+  dir=$(make_primary_dir "$TMP_ROOT/park-budget-write-fails")
+  : > "$dir/state/task1.meta"
+  mkdir "$dir/state/.turnend-devin-blocks"
+  write_arm_fixture "$dir" failed
+  write_pane_fixture "$dir" idle
+  out=$(run_park "$dir" p-1 '' "FM_DEVIN_PANE_READ=$dir/fixture/pane-read")
+  [ -z "$out" ] || fail "a repair with an unwritable budget must emit nothing, got: $out"
+  count=$(sed -n '3s/^count=//p' "$dir/state/.devin-park-loops" 2>/dev/null)
+  [ -z "$count" ] || fail "a suppressed repair must not consume a loop count, got: $count"
+  pass "devin park: a failed budget write leaves the loop count unchanged"
+}
+
 test_park_stands_down_on_queued_captain_input() {
   local dir park_pid out waited
   dir=$(make_primary_dir "$TMP_ROOT/park-queued")
@@ -726,6 +754,8 @@ test_park_never_exits_nonzero
 test_park_loop_counter_increments_and_resets_on_new_prompt
 test_park_loop_ceiling_warns_once_then_goes_quiet
 test_park_loop_counter_fails_closed_when_state_is_a_directory
+test_park_actionable_wake_does_not_count_when_budget_reset_fails
+test_park_repair_does_not_count_when_budget_write_fails
 test_park_stands_down_on_queued_captain_input
 test_park_stands_down_on_escape_marker
 test_park_stands_down_when_pane_read_fails_mid_park
