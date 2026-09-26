@@ -157,8 +157,8 @@ lock_acquire_bounded() {  # <lock>
 # The per-prompt block counter. Devin keeps invoking this hook for every
 # block-driven continuation, so count is a real loop bound even though the
 # payload carries no loop_count of its own.
-loops_next() {  # -> prints the count this emitted block would be, and persists it
-  local session prompt count=0 tmp
+loops_next() {  # -> sets LOOPS_COUNT and persists it
+  local session prompt count=0 tmp status=0
   session=$(sed -n '1s/^session=//p' "$LOOPS_FILE" 2>/dev/null || true)
   prompt=$(sed -n '2s/^prompt=//p' "$LOOPS_FILE" 2>/dev/null || true)
   count=$(sed -n '3s/^count=//p' "$LOOPS_FILE" 2>/dev/null || true)
@@ -166,10 +166,13 @@ loops_next() {  # -> prints the count this emitted block would be, and persists 
   [ "$session" = "$SESSION_ID" ] && [ "$prompt" = "$PROMPT_ID" ] || count=0
   count=$((count + 1))
   tmp="$LOOPS_FILE.tmp.$$"
+  [ ! -d "$LOOPS_FILE" ] || return 1
   printf 'session=%s\nprompt=%s\ncount=%s\n' "$SESSION_ID" "$PROMPT_ID" "$count" > "$tmp" 2>/dev/null \
-    && mv -f "$tmp" "$LOOPS_FILE" 2>/dev/null
+    && mv -f "$tmp" "$LOOPS_FILE" 2>/dev/null \
+    || status=1
   rm -f "$tmp" 2>/dev/null || true
-  printf '%s\n' "$count"
+  [ "$status" -eq 0 ] || return 1
+  LOOPS_COUNT=$count
 }
 
 # Emit exactly one block decision and stop, bounded by the per-prompt loop
@@ -177,19 +180,32 @@ loops_next() {  # -> prints the count this emitted block would be, and persists 
 # and above it the adapter goes quiet so the loop cannot run unbounded.
 emit_block() {  # <kind> <body> [reset-budget]
   local kind=$1 body=$2 reset_budget=${3-} encoded response count
-  count=$(loops_next)
-  [ "$count" -gt "$LOOP_CEILING" ] && exit 0
-  if [ "$count" -eq "$LOOP_CEILING" ]; then
-    kind=turn-end-guard
-    body="FIRSTMATE SUPERVISION FOLLOW-UP CEILING REACHED - this session has taken $count consecutive hook-driven continuations without a captain message, so automatic wake delivery stops here to bound the loop. Queued wakes stay durable: run bin/fm-wake-drain.sh, handle them, and run its exact WAKE_ACK_REQUIRED command. Supervision resumes automatically at the next turn end after the captain's next message."
-  fi
-  fm_operational_input_encode "$kind" "$body" encoded || exit 0
-  response=$(jq -n --arg m "$encoded" '{"decision":"block","reason":$m}' 2>/dev/null) || exit 0
   lock_acquire_bounded "$OWNER_LOCK" || exit 0
   if ! park_still_ours || ! current_session_still_ours || [ -e "$STATE/.afk" ]; then
     fm_lock_release "$OWNER_LOCK"
     exit 0
   fi
+  loops_next || {
+    fm_lock_release "$OWNER_LOCK"
+    exit 0
+  }
+  count=$LOOPS_COUNT
+  [ "$count" -gt "$LOOP_CEILING" ] && {
+    fm_lock_release "$OWNER_LOCK"
+    exit 0
+  }
+  if [ "$count" -eq "$LOOP_CEILING" ]; then
+    kind=turn-end-guard
+    body="FIRSTMATE SUPERVISION FOLLOW-UP CEILING REACHED - this session has taken $count consecutive hook-driven continuations without a captain message, so automatic wake delivery stops here to bound the loop. Queued wakes stay durable: run bin/fm-wake-drain.sh, handle them, and run its exact WAKE_ACK_REQUIRED command. Supervision resumes automatically at the next turn end after the captain's next message."
+  fi
+  fm_operational_input_encode "$kind" "$body" encoded || {
+    fm_lock_release "$OWNER_LOCK"
+    exit 0
+  }
+  response=$(jq -n --arg m "$encoded" '{"decision":"block","reason":$m}' 2>/dev/null) || {
+    fm_lock_release "$OWNER_LOCK"
+    exit 0
+  }
   if [ "$reset_budget" = reset-budget ] && ! budget_reset; then
     fm_lock_release "$OWNER_LOCK"
     exit 0
@@ -238,29 +254,48 @@ budget_reset_if_ours() {
 }
 
 emit_repair_followup() {  # <reason> <arm-tail> <attempt>
-  local reason=$1 arm_tail=$2 attempt_count=$3 prior count body
-  park_still_ours || exit 0
-  budget_read
-  [ "$BUDGET_COUNT" -lt "$BLOCK_BUDGET" ] || exit 0
-  prior=$BUDGET_COUNT
-  count=$((prior + 1))
-
-  body="TURN WOULD END BLIND - supervision is off. The hook-owned watcher park could not establish a live cycle after $attempt_count bounded attempts (nag $count of $BLOCK_BUDGET).
-$arm_tail
-
-$reason"
+  local reason=$1 arm_tail=$2 attempt_count=$3 count body encoded response
   lock_acquire_bounded "$OWNER_LOCK" || exit 0
   if ! park_still_ours || ! current_session_still_ours || [ -e "$STATE/.afk" ]; then
     fm_lock_release "$OWNER_LOCK"
     exit 0
   fi
   budget_read
-  if [ "$BUDGET_COUNT" -ne "$prior" ] || ! budget_write "$count"; then
+  [ "$BUDGET_COUNT" -lt "$BLOCK_BUDGET" ] || {
+    fm_lock_release "$OWNER_LOCK"
+    exit 0
+  }
+  count=$((BUDGET_COUNT + 1))
+  body="TURN WOULD END BLIND - supervision is off. The hook-owned watcher park could not establish a live cycle after $attempt_count bounded attempts (nag $count of $BLOCK_BUDGET).
+$arm_tail
+
+$reason"
+  loops_next || {
+    fm_lock_release "$OWNER_LOCK"
+    exit 0
+  }
+  if [ "$LOOPS_COUNT" -gt "$LOOP_CEILING" ]; then
     fm_lock_release "$OWNER_LOCK"
     exit 0
   fi
+  if [ "$LOOPS_COUNT" -eq "$LOOP_CEILING" ]; then
+    body="FIRSTMATE SUPERVISION FOLLOW-UP CEILING REACHED - this session has taken $LOOPS_COUNT consecutive hook-driven continuations without a captain message, so automatic wake delivery stops here to bound the loop. Queued wakes stay durable: run bin/fm-wake-drain.sh, handle them, and run its exact WAKE_ACK_REQUIRED command. Supervision resumes automatically at the next turn end after the captain's next message."
+  fi
+  fm_operational_input_encode turn-end-guard "$body" encoded || {
+    fm_lock_release "$OWNER_LOCK"
+    exit 0
+  }
+  response=$(jq -n --arg m "$encoded" '{"decision":"block","reason":$m}' 2>/dev/null) || {
+    fm_lock_release "$OWNER_LOCK"
+    exit 0
+  }
+  budget_write "$count" || {
+    fm_lock_release "$OWNER_LOCK"
+    exit 0
+  }
+  printf '%s\n' "$response" || true
   fm_lock_release "$OWNER_LOCK"
-  emit_block turn-end-guard "$body"
+  exit 0
 }
 
 # --- park ownership ----------------------------------------------------------
@@ -325,6 +360,11 @@ pane_read() {
   fm_backend_visible_capture "$PANE_BACKEND" "$PANE_TARGET" 2>/dev/null
 }
 
+pane_capture() {
+  PANE_CAPTURE=$(pane_read 2>/dev/null) || return 1
+  [ -n "$PANE_CAPTURE" ]
+}
+
 # Only the lock-owning session may arm or wake. A prior session that died
 # leaving its numeric harness pid behind is the one recoverable
 # case, delegated to bin/fm-lock.sh so acquisition keeps its single owner.
@@ -357,7 +397,8 @@ fi
 # A park with no readable pane would hold the turn boundary while the captain's
 # typed input sits in Devin's queue undelivered - a lockout for the whole hook
 # timeout. Spend one bounded repair follow-up instead of parking blind.
-if { [ -n "${FM_DEVIN_PANE_READ:-}" ] || pane_locate; } && pane_read >/dev/null 2>&1; then
+PANE_CAPTURE=
+if { [ -n "${FM_DEVIN_PANE_READ:-}" ] || pane_locate; } && pane_capture; then
   :
 else
   emit_repair_followup \
@@ -400,7 +441,7 @@ while [ "$attempt" -lt "$ARM_ATTEMPTS" ]; do
       STAND_DOWN=1
       break
     fi
-    if pane_read | fm_devin_pane_stands_down; then
+    if ! pane_capture || printf '%s\n' "$PANE_CAPTURE" | fm_devin_pane_stands_down; then
       STAND_DOWN=1
       break
     fi
@@ -413,6 +454,9 @@ while [ "$attempt" -lt "$ARM_ATTEMPTS" ]; do
   fi
   wait "$ARM_PID" 2>/dev/null
   ARM_PID=
+
+  # Devin drains queued captain input after this continuation, and the next
+  # Stop park sees its marker on the first poll tick.
 
   # Away mode may have been entered while parked: the daemon owns triage now.
   [ -e "$STATE/.afk" ] && exit 0

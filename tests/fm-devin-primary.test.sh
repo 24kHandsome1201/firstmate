@@ -191,11 +191,22 @@ write_pane_fixture() {  # <dir> <kind>
         printf '%s\n' 'SWE-2 Medium'
       } > "$dir/fixture/pane.txt"
       ;;
+    fail-later)
+      printf '%s\n' '❭ Guide Devin while it works' > "$dir/fixture/pane.txt"
+      ;;
   esac
-  cat > "$dir/fixture/pane-read" <<SH
+  if [ "$2" = fail-later ]; then
+    cat > "$dir/fixture/pane-read" <<SH
+#!/usr/bin/env bash
+[ ! -e "$dir/fixture/pane-fail" ] || exit 1
+exec cat "$dir/fixture/pane.txt"
+SH
+  else
+    cat > "$dir/fixture/pane-read" <<SH
 #!/usr/bin/env bash
 exec cat "$dir/fixture/pane.txt"
 SH
+  fi
   chmod +x "$dir/fixture/pane-read"
 }
 
@@ -398,6 +409,19 @@ test_park_loop_ceiling_warns_once_then_goes_quiet() {
   pass "devin park: the loop ceiling warns exactly once, then stops the loop"
 }
 
+test_park_loop_counter_fails_closed_when_state_is_a_directory() {
+  local dir out
+  dir=$(make_primary_dir "$TMP_ROOT/park-loops-directory")
+  : > "$dir/state/task1.meta"
+  mkdir "$dir/state/.devin-park-loops"
+  write_arm_fixture "$dir" actionable
+  write_pane_fixture "$dir" idle
+  out=$(run_park "$dir" p-1 '' "FM_DEVIN_PANE_READ=$dir/fixture/pane-read")
+  [ -z "$out" ] || fail "an unpersistable loop counter must suppress the block, got: $out"
+  [ -d "$dir/state/.devin-park-loops" ] || fail "the invalid loop-counter directory was replaced"
+  pass "devin park: an unpersistable loop counter fails closed"
+}
+
 test_park_stands_down_on_queued_captain_input() {
   local dir park_pid out waited
   dir=$(make_primary_dir "$TMP_ROOT/park-queued")
@@ -438,6 +462,27 @@ test_park_stands_down_on_escape_marker() {
   out=$(cat "$dir/state/park-out" 2>/dev/null || true)
   [ -z "$out" ] || fail "the park must stand down silently on the Escape marker, got: $out"
   pass "devin park: an esc-again marker ends the park without a block"
+}
+
+test_park_stands_down_when_pane_read_fails_mid_park() {
+  local dir park_pid out waited
+  dir=$(make_primary_dir "$TMP_ROOT/park-pane-fails")
+  : > "$dir/state/task1.meta"
+  write_arm_fixture "$dir" switchable
+  write_pane_fixture "$dir" fail-later
+  ( run_park "$dir" p-1 '' "FM_DEVIN_PANE_READ=$dir/fixture/pane-read" > "$dir/state/park-out" ) &
+  park_pid=$!
+  waited=0
+  while [ ! -e "$dir/state/arm-ran" ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+    [ "$waited" -lt 200 ] || fail "the park never began polling its pane"
+  done
+  : > "$dir/fixture/pane-fail"
+  wait "$park_pid" 2>/dev/null || true
+  out=$(cat "$dir/state/park-out" 2>/dev/null || true)
+  [ -z "$out" ] || fail "the park must stand down silently when its pane becomes unreadable, got: $out"
+  pass "devin park: a pane read failure during polling ends the park silently"
 }
 
 test_park_ignores_transcript_marker_text() {
@@ -529,7 +574,7 @@ test_park_nag_budget_resets_after_a_real_wake() {
 }
 
 test_park_stands_down_when_superseded() {
-  local dir first_pid first_out waited
+  local dir first_pid first_out waited count
   dir=$(make_primary_dir "$TMP_ROOT/park-supersede")
   : > "$dir/state/task1.meta"
   write_arm_fixture "$dir" switchable
@@ -547,6 +592,8 @@ test_park_stands_down_when_superseded() {
   wait "$first_pid" 2>/dev/null || true
   first_out=$(cat "$dir/state/first-park-out" 2>/dev/null || true)
   [ -z "$first_out" ] || fail "the older park delivered after the newer stop claimed the baton: $first_out"
+  count=$(sed -n '3s/^count=//p' "$dir/state/.devin-park-loops" 2>/dev/null)
+  [ "$count" = 1 ] || fail "the superseded park must not consume a loop count, got: $count"
   pass "devin park: an older park stands down after a newer stop claim"
 }
 
@@ -678,8 +725,10 @@ test_park_delivers_actionable_wake_as_block_decision
 test_park_never_exits_nonzero
 test_park_loop_counter_increments_and_resets_on_new_prompt
 test_park_loop_ceiling_warns_once_then_goes_quiet
+test_park_loop_counter_fails_closed_when_state_is_a_directory
 test_park_stands_down_on_queued_captain_input
 test_park_stands_down_on_escape_marker
+test_park_stands_down_when_pane_read_fails_mid_park
 test_park_ignores_transcript_marker_text
 test_park_refuses_to_park_blind
 test_park_repair_nag_is_bounded
