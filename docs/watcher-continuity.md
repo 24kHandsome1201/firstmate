@@ -19,7 +19,7 @@ In this document, an arm is one run of `bin/fm-watch-arm.sh`, which starts a wat
 
 ## Ownership
 
-On Pi, omp, OpenCode, Cursor, and Claude primaries, one component owns re-arming the watcher.
+On Pi, omp, OpenCode, Cursor, Devin, and Claude primaries, one component owns re-arming the watcher.
 Codex and Grok keep their own protocols; see [Manual recovery and other harnesses](#manual-recovery-and-other-harnesses).
 
 | Harness | Re-arm owner |

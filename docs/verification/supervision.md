@@ -273,7 +273,7 @@ The blocking and bounded-follow-up mechanisms were validated across eight harnes
 ### Devin primary park, 2026-09-26
 
 Devin was validated as a primary on 2026-09-26 against `devin 3000.11.3 (9c803229faa4)` on macOS arm64 with tmux 3.x, in a throwaway firstmate home on private tmux sockets, never against a live home and never with a user-scope hook.
-Mechanism facts were established first in scratch workspaces (`/tmp/devin-research/`, rounds 1-2):
+Mechanism facts were established first in isolated scratch workspaces:
 
 | Question | Method | Result |
 | --- | --- | --- |
@@ -281,7 +281,7 @@ Mechanism facts were established first in scratch workspaces (`/tmp/devin-resear
 | Is the hook awaited? | `Stop` hook sleeps 300s under `timeout: 28800` | Yes; the turn stays open the full sleep with the spinner running and the deferred block is then delivered. |
 | What is the default timeout? | no-`timeout` hook sleeping 700s | 60s. The hook's own shell is killed, its `sleep` child is orphaned, and the turn ends with no block delivered. The tracked registration therefore sets `timeout: 28800`. |
 | Does a typed captain message interrupt the park? | text + Enter during a 90s park | No. Devin renders a `─ N queued ─` row and `Press Enter to send queued messages now`; when the hook exits without a block, each queued message drains as its own turn with a fresh `prompt_id`. The park polls its own pane for those markers and stands down silently so the queue drains. |
-| Does Escape render a park-visible marker? | one Esc during a 90s parked `Stop` hook (round-3 check) | Yes: `⠠⠤ Typing · 15s (esc again to interrupt)` on the spinner row at +0.3s and +1.5s, reverting to `esc twice` by ~+5s (captures `/tmp/devin-research/round3/captures/esc-{0.3s,1.5s,5s}.txt`). The hook is not killed; the cancel is deferred to hook exit, so standing the park down is what lets it take effect. |
+| Does Escape render a park-visible marker? | one Esc during a 90s parked `Stop` hook | Yes: `⠠⠤ Typing · 15s (esc again to interrupt)` appeared on the spinner row at +0.3s and +1.5s, reverting to `esc twice` by about +5s. The hook is not killed; the cancel is deferred to hook exit, so standing the park down is what lets it take effect. |
 | Is there a `loop_count`? | payload inspection across block continuations | No; only boolean `stop_hook_active`. `prompt_id` is constant across continuations and rotates per real message, so the guard keeps a prompt-keyed counter in `state/.devin-park-loops`. |
 | Process tree | ancestry of hook and tool shells | `zsh → devin (front-end) → devin acp → hook/tool shell`; the `devin acp` pid is the stable per-session lock anchor. `AI_AGENT=devin_3000-11-3_agent` and `DEVIN_PROJECT_DIR` are set by Devin; the latter is hook-only, which anchors the foreign-host predicate. |
 | Claude import isolation | project `.claude/settings.json` loggers plus `read_config_from.claude=false` | With the tracked `.devin/config.json` no Claude-shaped hook fired; `asyncRewake` is ignored by Devin so the imported Claude auto-arm would otherwise have parked the turn synchronously. |
@@ -307,7 +307,7 @@ ok - devin primary: read_config_from.claude=false held - no Claude-shaped hook o
 
 One live-run divergence from the Cursor shape: Devin does not echo the block reason back to the pane, so the guard proves wake delivery through the durable loop record plus the model visibly running `bin/fm-wake-drain.sh`, not through a rendered `FIRSTMATE_OP` line.
 The captain-activity markers are matched only in the bottom composer region of the own-pane capture (trailing blank rows dropped, last 12 rows, line-anchored patterns), because the transcript above can legitimately print the same strings inside tool output; `tests/fm-devin-primary.test.sh` carries the transcript-region and above-region negative cases beside the positive stand-down cases.
-The herdr own-pane read the park relies on was exercised from a live herdr-hosted Devin session on 2026-09-26: `discover_supervisor_target` returned `default:w2:p1`, `discover_supervisor_backend` returned `herdr`, and `fm_backend_visible_capture herdr default:w2:p1` exited 0 with the composer rows visible (probe script `/tmp/fm-herdr-own-pane.sh`); the live e2e itself ran on tmux.
+The Herdr own-pane read the park relies on was exercised from a live Herdr-hosted Devin session on 2026-09-26: target discovery selected the live Devin pane, backend discovery returned `herdr`, and `fm_backend_visible_capture` exited 0 with the composer rows visible; the live end-to-end guard itself ran on tmux.
 The portable regression `tests/fm-devin-primary.test.sh` covers the foreign-host predicate, the prompt-keyed loop counter and ceiling, the queue and Esc stand-down markers, the bounded repair follow-up on an unreadable pane, supersession, AFK, lock ownership, child worktrees, and the SessionStart transport shape.
 Away mode follows the generic non-Pi path unchanged: the park exits silently while `state/.afk` is present.
 Devin is deliberately not a secondmate harness, and no `UserPromptSubmit` or host-mirror registration ships.

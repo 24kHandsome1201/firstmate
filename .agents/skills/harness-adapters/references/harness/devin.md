@@ -1,6 +1,6 @@
 # Devin CLI
 
-Verified on 2026-09-21 and 2026-09-22 with Devin CLI 3000.11.1 (cc4e349ca55e).
+Worker lifecycle verified on 2026-09-21 and 2026-09-22 with Devin CLI 3000.11.1 (cc4e349ca55e), and primary integration verified on 2026-09-26 with 3000.11.3 (9c803229faa4).
 The router owns the dispatch boundary: primary, crewmate, and scout are supported; secondmate integration is unsupported.
 [Verification evidence](../../../../../docs/verification/devin.md) and its live guard refresh the vendor facts below.
 

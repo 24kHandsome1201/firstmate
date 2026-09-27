@@ -1,8 +1,8 @@
-# Devin CLI worker verification
+# Devin CLI verification
 
 Audience: maintainer verification.
 
-Verified 2026-09-21 and re-verified 2026-09-22 on macOS arm64 with `devin 3000.11.1 (cc4e349ca55e)`.
+Worker lifecycle was verified 2026-09-21 and re-verified 2026-09-22 on macOS arm64 with `devin 3000.11.1 (cc4e349ca55e)`; the primary integration was verified 2026-09-26 with `devin 3000.11.3 (9c803229faa4)`.
 The [adapter reference](../../.agents/skills/harness-adapters/references/harness/devin.md) owns operating facts; executable owners carry launch and state mechanics.
 This verification covers the primary (see [Devin primary](#devin-primary-2026-09-26) below), crewmates, and scouts, with tmux as the exercised runtime backend and a Herdr 0.9.0 lab session for the lifecycle checks below.
 Secondmate, ACP, and quota-provider integration are outside this guarantee.
@@ -148,4 +148,4 @@ The live guard checks main-turn completion, Claude hook isolation, commit attrib
 The shared process classifier supplies the same native identity to tmux and Herdr; Herdr interrupt, steering, and identity were exercised in a lab session, while Herdr `exit` refuses as described above.
 Zellij, Orca, and cmux were inspected through their existing backend-neutral delivery and key capability surfaces, not live-tested here.
 Orca's existing lack of Escape delivery means a Devin interrupt is refused there.
-A direct keyboard cancellation bypassing `fm-control` can retain a busy record until normal completion or session exit; no primary supervision guarantee is implied by these worker hooks.
+A direct keyboard cancellation bypassing `fm-control` can retain a worker busy record until normal completion or session exit.
