@@ -1,0 +1,31 @@
+ok - fm-turnend-guard: Devin payload is inert without --devin and blocks with it
+ok - fm-turnend-guard: transcript_path keeps a genuine Claude payload blocking
+ok - fm-claude-stop-autoarm: inert on a Devin-delivered payload
+ok - fm-sessionstart-run: inert on a Devin payload, unchanged otherwise
+ok - fm-arm-pretool-check: Devin duplicate allows, --devin blocks in Devin's own shape
+ok - fm-cd-pretool-check: Devin duplicate allows, --devin blocks in Devin's own shape
+ok - devin park: silent no-op when no supervision is needed
+ok - devin park: an actionable close is delivered as one watcher-kind block decision
+ok - devin park: always exits 0, even when supervision is genuinely down
+ok - devin park: the prompt_id-keyed loop counter increments per block and resets on a new prompt
+ok - devin park: the loop ceiling warns exactly once, then stops the loop
+ok - devin park: an unpersistable loop counter fails closed
+ok - devin park: a failed budget reset leaves the loop count unchanged
+ok - devin park: a failed budget write leaves the loop count unchanged
+ok - devin park: a queued captain message ends the park without a block
+ok - devin park: an esc-again marker ends the park without a block
+ok - devin park: a pane read failure during polling ends the park silently
+ok - devin park: marker strings in the transcript region or above the composer region do not stand the park down
+ok - devin park: an unreadable pane yields one bounded repair follow-up, never a blind park
+ok - devin park: the repair nag is bounded and then goes quiet
+ok - devin park: a delivered wake resets the bounded repair budget
+ok - devin park: an older park stands down after a newer stop claim
+ok - devin park: inert while away mode is active
+ok - devin park: inert when this session does not hold the home lock
+warning: re-init: ignored --initial-branch=main
+ok - devin park: inert inside a child crewmate worktree
+ok - devin park: malformed payloads fail open without arming
+ok - fm-sessionstart-devin: SessionStart injects context in Devin's own shape
+warning: re-init: ignored --initial-branch=main
+ok - fm-sessionstart-devin: silent inside a child crewmate worktree
+ok - devin registration: covers every primary event with a long Stop timeout and Claude import off

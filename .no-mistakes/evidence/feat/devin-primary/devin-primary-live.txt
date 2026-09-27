@@ -1,0 +1,8 @@
+harness: devin 3000.11.3 (9c803229faa4)
+ok - devin primary: the SessionStart hook takes the fleet lock as the devin acp process
+ok - devin primary: the run-tier session start completes every stage
+ok - devin primary: SessionStart additionalContext reaches model context before the first turn
+ok - devin primary: the Stop-hook park delivers a real watcher wake as one block continuation
+ok - devin primary: the park owns an arm cycle with a live watcher beacon
+ok - devin primary: queued captain input stands the park down, drains as its own turn, and the next stop re-parks
+ok - devin primary: read_config_from.claude=false held - no Claude-shaped hook or auto-arm ran
