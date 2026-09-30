@@ -583,7 +583,7 @@ That warning uses `bin/fm-supervision-instructions.sh --repair-line`, so it alwa
 - The away-mode beacon's poll-derived grace widening for a live daemon still mid-cycle and its bound against a dead daemon, a beacon older than that wider grace, and FM_POLL's inapplicability with away mode off.
 - Pi logical-run latching.
 - Missing-`jq` behavior.
-- All five primary registrations.
+- The non-Devin primary registrations that route through this shared suite.
 - Grok native and legacy selection.
 - Typed field precedence.
 - Malformed input.
@@ -612,6 +612,16 @@ It also covers true-reason banner wording and reason-keyed episode dedup survivi
 - Child-worktree exclusion.
 - That the adapter never exits 2.
 
+`tests/fm-devin-primary.test.sh` covers the Devin park end to end over real processes with no harness installed:
+
+- Devin-delivered payloads standing down every tracked Claude-shaped duplicate entrypoint.
+- The `--devin` path reaching the shared guard and rendering Devin's block-decision shape.
+- The bounded repair nag and prompt-id-keyed loop ceiling.
+- Queued captain-input and Escape stand-down through the pane reader.
+- Supersession, away-mode, and lock-ownership inertness.
+- SessionStart context injection and tracked `.devin/hooks.v1.json` registration shape.
+- That the adapter never exits nonzero.
+
 `tests/fm-kimi-harness.test.sh` covers the separate Kimi crew hook's format preservation, idempotence, refusal cases, token guard, spawn registration, and teardown cleanup.
 `tests/fm-supervision-instructions.test.sh` covers recovery-line ownership and pi-signed's identity-preserving reuse of Pi's protocol.
 `tests/fm-omp-harness.test.sh` covers the omp extension pair over a fake omp API (forced continuation on exit 2, the `stop_hook_active` bound, the seatbelt block, the ownership proof).
@@ -619,6 +629,7 @@ It also covers true-reason banner wording and reason-keyed episode dedup survivi
 The opt-in live tests are:
 
 - `FM_CURSOR_PRIMARY_LIVE_E2E=1 tests/fm-cursor-primary-live-e2e.test.sh` is the opt-in guard that proves the Cursor park behavior covered by `tests/fm-cursor-primary.test.sh` against the installed cursor-agent and fails naming the harness and version.
+- `FM_DEVIN_PRIMARY_LIVE_E2E=1 tests/fm-devin-primary-live-e2e.test.sh` is the opt-in guard that proves the Devin park behavior covered by `tests/fm-devin-primary.test.sh` against the installed Devin CLI and fails naming the harness and version.
 - `FM_PI_LIVE_E2E=1 tests/fm-pi-primary-live-e2e.test.sh` is the opt-in isolated Pi path.
 - `FM_OMP_LIVE_E2E=1 tests/fm-omp-primary-live-e2e.test.sh` is the opt-in isolated omp path.
 
