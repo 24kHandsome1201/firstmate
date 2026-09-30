@@ -75,7 +75,7 @@ install_scripts() {
   for f in fm-turnend-guard-devin.sh fm-turnend-guard.sh fm-sessionstart-devin.sh \
            fm-sessionstart-run.sh fm-sessionstart-nudge.sh fm-arm-pretool-check.sh \
            fm-cd-pretool-check.sh fm-claude-stop-autoarm.sh fm-hook-host-lib.sh \
-           fm-primary-scope-lib.sh fm-supervision-lib.sh fm-wake-lib.sh \
+           fm-primary-scope-lib.sh fm-supervision-lib.sh fm-wake-lib.sh fm-path-lib.sh \
            fm-session-lock-lib.sh fm-cursor-lib.sh fm-operational-input.sh \
            fm-supervision-instructions.sh fm-harness.sh fm-lock.sh \
            fm-supervisor-target-lib.sh fm-backend.sh \
@@ -450,6 +450,62 @@ test_park_repair_does_not_count_when_budget_write_fails() {
   pass "devin park: a failed budget write leaves the loop count unchanged"
 }
 
+# Keep polling idle until the arm is gone, then expose the final-pane state.
+# This isolates the post-arm emission window from the ordinary polling path.
+test_park_checks_pane_after_arm_close() {
+  local dir out arm_kind pane_kind
+  for arm_kind in actionable failed; do
+    for pane_kind in queued esc unreadable; do
+      dir=$(make_primary_dir "$TMP_ROOT/park-final-$arm_kind-$pane_kind")
+      : > "$dir/state/task1.meta"
+      write_arm_fixture "$dir" "$arm_kind"
+      write_pane_fixture "$dir" "$pane_kind"
+      cat > "$dir/fixture/pane-read" <<'SH'
+#!/usr/bin/env bash
+pid=$(tail -1 "$FM_HOME/state/arm-ran" 2>/dev/null)
+if [ -z "$pid" ] || kill -0 "$pid" 2>/dev/null; then
+  printf '%s\n' '❭ Guide Devin while it works'
+else
+  : > "$FM_HOME/state/final-pane-read"
+  cat "$FM_HOME/fixture/pane.txt"
+fi
+SH
+      out=$(FM_DEVIN_PARK_ATTEMPTS=1 run_park "$dir" p-1 '' "FM_DEVIN_PANE_READ=$dir/fixture/pane-read")
+      [ -z "$out" ] || fail "$arm_kind close must stand down for final $pane_kind pane, got: $out"
+      [ -e "$dir/state/final-pane-read" ] || fail "the pane was never checked after the arm closed"
+      [ ! -e "$dir/state/.devin-park-loops" ] || fail "final pane stand-down consumed a loop count"
+      [ ! -e "$dir/state/.turnend-devin-blocks" ] || fail "final pane stand-down consumed a repair nag"
+    done
+  done
+  pass "devin park: final queued, Escape, and unreadable panes suppress both wake and repair blocks"
+}
+
+test_park_refuses_arm_without_output_capture() {
+  local dir out real_mktemp i
+  dir=$(make_primary_dir "$TMP_ROOT/park-no-capture")
+  : > "$dir/state/task1.meta"
+  write_arm_fixture "$dir" actionable
+  write_pane_fixture "$dir" idle
+  real_mktemp=$(command -v mktemp)
+  cat > "$dir/fixture/mktemp" <<SH
+#!/usr/bin/env bash
+case "\$*" in *'.devin-park-output.'*) exit 1 ;; esac
+exec "$real_mktemp" "\$@"
+SH
+  chmod +x "$dir/fixture/mktemp"
+  for i in 1 2 3 4; do
+    out=$(PATH="$dir/fixture:$PATH" run_park "$dir" p-1 '' "FM_DEVIN_PANE_READ=$dir/fixture/pane-read")
+    [ ! -e "$dir/state/arm-ran" ] || fail "the watcher arm ran without an output capture channel"
+    if [ "$i" -le 3 ]; then
+      [ "$(kind_of_block "$out")" = turn-end-guard ] || fail "capture failure must issue a bounded repair notice: $out"
+      case "$(decision_reason_of "$out")" in *'capture'*) ;; *) fail "repair must identify the missing capture channel: $out" ;; esac
+    else
+      [ -z "$out" ] || fail "capture failure exceeded the repair budget: $out"
+    fi
+  done
+  pass "devin park: capture failure never arms, including after repair budget exhaustion"
+}
+
 test_park_stands_down_on_queued_captain_input() {
   local dir park_pid out waited
   dir=$(make_primary_dir "$TMP_ROOT/park-queued")
@@ -756,6 +812,8 @@ test_park_loop_ceiling_warns_once_then_goes_quiet
 test_park_loop_counter_fails_closed_when_state_is_a_directory
 test_park_actionable_wake_does_not_count_when_budget_reset_fails
 test_park_repair_does_not_count_when_budget_write_fails
+test_park_checks_pane_after_arm_close
+test_park_refuses_arm_without_output_capture
 test_park_stands_down_on_queued_captain_input
 test_park_stands_down_on_escape_marker
 test_park_stands_down_when_pane_read_fails_mid_park

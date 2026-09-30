@@ -1117,10 +1117,15 @@ test_failed_lock_write_restores_previous_sidecar() {
 # A failed line-1 write that had no previous sidecar must not leave the new id
 # behind; the lock stays ancestry-only.
 test_failed_lock_write_removes_new_sidecar_when_none_existed() {
-  local dir
+  local dir stale_pid
   dir="$TMP_ROOT/restore-absent-sidecar"
   mkdir -p "$dir/state"
-  printf '1\n' > "$dir/state/.lock"
+  # PID 1 can itself be a live harness in a container. Use a reaped fixture.
+  sleep 0 &
+  stale_pid=$!
+  wait "$stale_pid"
+  kill -0 "$stale_pid" 2>/dev/null && fail "the stale-pid fixture is still alive"
+  printf '%s\n' "$stale_pid" > "$dir/state/.lock"
   chmod a-w "$dir/state/.lock" || fail "could not make the stale lock read-only"
   env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
     FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \
@@ -1135,7 +1140,7 @@ test_failed_lock_write_removes_new_sidecar_when_none_existed() {
     || fail "the reclaim did not fail on the lock write: $(cat "$dir/state/reclaim.out")"
   [ ! -e "$dir/state/.lock-session" ] \
     || fail "the failed reclaim left sidecar $(cat "$dir/state/.lock-session"), expected none"
-  [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = 1 ] \
+  [ "$(tr -d '[:space:]' < "$dir/state/.lock")" = "$stale_pid" ] \
     || fail "the failed reclaim rewrote lock line 1"
   pass "session-lock: a failed lock write removes a newly created sidecar"
 }
@@ -1143,10 +1148,15 @@ test_failed_lock_write_removes_new_sidecar_when_none_existed() {
 # A completed reclaim must keep the new id beside the new pid after the writer
 # exits, so a late signal cannot unwind a verified publication.
 test_verified_reclaim_keeps_new_sidecar() {
-  local dir
+  local dir stale_pid
   dir="$TMP_ROOT/verified-reclaim"
   mkdir -p "$dir/state"
-  printf '1\n' > "$dir/state/.lock"
+  # PID 1 can itself be a live harness in a container. Use a reaped fixture.
+  sleep 0 &
+  stale_pid=$!
+  wait "$stale_pid"
+  kill -0 "$stale_pid" 2>/dev/null && fail "the stale-pid fixture is still alive"
+  printf '%s\n' "$stale_pid" > "$dir/state/.lock"
   printf 'S1\n' > "$dir/state/.lock-session"
   env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
     FM_HOME="$dir" FM_LOCK="$ROOT/bin/fm-lock.sh" \

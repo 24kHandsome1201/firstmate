@@ -20,6 +20,7 @@
 # does not need. Every path exits 0 and the only output is at most one
 # decision object on stdout. The continuation shares the turn's prompt_id and
 # fires no UserPromptSubmit, which is what the loop counter below keys on.
+# Refuse to arm if its output capture cannot be created; never discard a wake.
 # docs/turnend-guard.md:16 accepts one bounded follow-up as an equal
 # alternative to blocking, which is the same primitive the Cursor park uses.
 #
@@ -30,6 +31,7 @@
 # $HERDR_ENV/$HERDR_PANE_ID, resolved by bin/fm-supervisor-target-lib.sh - and
 # stands down silently when a queue or pending-cancel marker is rendered,
 # ending the park so the queue drains and the message runs as its own turn.
+# Before emitting a post-arm block, check the pane again under the owner lock.
 # The next turn end parks again. When the pane cannot be located or read at
 # park start the adapter does NOT park blind - the captain would be locked out
 # for the whole hook timeout - and instead spends one bounded repair follow-up
@@ -109,7 +111,7 @@ fm_devin_pane_stands_down() {
         line = buf[i]
         if (line ~ /^❭ Press Enter to send queued messages now/) exit 0
         if (line ~ /^[[:space:]]*(─)+ [0-9]+ queued ─/) exit 0
-        if (line ~ /^[^[:space:]│]/ && line ~ /Typing ·.*\(esc again to interrupt\)/) exit 0
+        if (line ~ /^[^[:space:]]/ && line !~ /^│/ && line ~ /Typing ·.*\(esc again to interrupt\)/) exit 0
       }
       exit 1
     }'
@@ -205,6 +207,10 @@ emit_block() {  # <kind> <body> [reset-budget]
     fm_lock_release "$OWNER_LOCK"
     exit 0
   }
+  if [ "$PANE_READY" -eq 1 ] && ! pane_allows_block; then
+    fm_lock_release "$OWNER_LOCK"
+    exit 0
+  fi
   if [ "$reset_budget" = reset-budget ] && ! budget_reset; then
     fm_lock_release "$OWNER_LOCK"
     exit 0
@@ -289,6 +295,10 @@ $reason"
     fm_lock_release "$OWNER_LOCK"
     exit 0
   }
+  if [ "$PANE_READY" -eq 1 ] && ! pane_allows_block; then
+    fm_lock_release "$OWNER_LOCK"
+    exit 0
+  fi
   budget_write "$count" || {
     fm_lock_release "$OWNER_LOCK"
     exit 0
@@ -369,6 +379,13 @@ pane_capture() {
   [ -n "$PANE_CAPTURE" ]
 }
 
+# A final capture under the owner lock closes the gap between the last poll
+# and block emission. An unreadable pane also releases the turn for user input.
+pane_allows_block() {
+  pane_capture || return 1
+  ! printf '%s\n' "$PANE_CAPTURE" | fm_devin_pane_stands_down
+}
+
 # Only the lock-owning session may arm or wake. A prior session that died
 # leaving its numeric harness pid behind is the one recoverable
 # case, delegated to bin/fm-lock.sh so acquisition keeps its single owner.
@@ -402,8 +419,9 @@ fi
 # typed input sits in Devin's queue undelivered - a lockout for the whole hook
 # timeout. Spend one bounded repair follow-up instead of parking blind.
 PANE_CAPTURE=
+PANE_READY=0
 if { [ -n "${FM_DEVIN_PANE_READ:-}" ] || pane_locate; } && pane_capture; then
-  :
+  PANE_READY=1
 else
   emit_repair_followup \
     'the Devin primary park needs this session running in a tmux or herdr pane it can read (no TMUX_PANE or HERDR_PANE_ID was usable); relaunch the primary under tmux or herdr, or the park will stand down at every turn end' \
@@ -431,11 +449,13 @@ while [ "$attempt" -lt "$ARM_ATTEMPTS" ]; do
   current_session_still_ours || exit 0
   attempt=$((attempt + 1))
   ARM_OUT=$(mktemp "$STATE/.devin-park-output.XXXXXX") || ARM_OUT=
-  if [ -n "$ARM_OUT" ]; then
-    "$SCRIPT_DIR/fm-watch-arm.sh" >"$ARM_OUT" 2>&1 &
-  else
-    "$SCRIPT_DIR/fm-watch-arm.sh" >/dev/null 2>&1 &
+  if [ -z "$ARM_OUT" ]; then
+    # Never consume a watcher close without a channel that preserves its wake.
+    emit_repair_followup \
+      'cannot create the watcher output capture file; repair the state directory before retrying supervision' \
+      '' "$((attempt - 1))"
   fi
+  "$SCRIPT_DIR/fm-watch-arm.sh" >"$ARM_OUT" 2>&1 &
   ARM_PID=$!
   while kill -0 "$ARM_PID" 2>/dev/null; do
     # Stand down for a newer stop's claim, for away mode taking over the
@@ -459,8 +479,8 @@ while [ "$attempt" -lt "$ARM_ATTEMPTS" ]; do
   wait "$ARM_PID" 2>/dev/null
   ARM_PID=
 
-  # Devin drains queued captain input after this continuation, and the next
-  # Stop park sees its marker on the first poll tick.
+  # Both block paths take one final pane capture under the owner lock so
+  # input queued at watcher close can drain before any continuation.
 
   # Away mode may have been entered while parked: the daemon owns triage now.
   [ -e "$STATE/.afk" ] && exit 0

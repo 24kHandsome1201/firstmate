@@ -207,8 +207,20 @@ pass "devin primary: the park owns an arm cycle with a live watcher beacon"
 # queue marker, kill the arm, and exit so the turn closes and the queue drains.
 wait_for_park_seq 1 120 "the first needed park"
 BEFORE_SEQ=$(park_seq)
-submit "PING-CAPTAIN reply with exactly the token QUEUE_DRAINED and nothing else."
-wait_for_pane "QUEUE_DRAINED" 300 "the queued captain message answered as its own turn"
+# Never submit the expected reply verbatim: full scrollback contains the
+# captain's prompt echo even when the queued turn has not run. A per-run joined
+# token can only appear after Devin processes the split-token instruction.
+QUEUE_REPLY_SUFFIX="DRAINED_$$_$RANDOM"
+QUEUE_REPLY="QUEUE_$QUEUE_REPLY_SUFFIX"
+QUEUE_PROMPT="PING-CAPTAIN Do not run any command. Join the two strings QUEUE_ and $QUEUE_REPLY_SUFFIX with no separator, and reply with only the joined token."
+case "$QUEUE_PROMPT" in
+  *"$QUEUE_REPLY"*) harness_fail "the queued response probe must not contain its expected reply" ;;
+esac
+case "$(pane_text)" in
+  *"$QUEUE_REPLY"*) harness_fail "the queued response token appeared before its prompt was submitted" ;;
+esac
+submit "$QUEUE_PROMPT"
+wait_for_pane "$QUEUE_REPLY" 300 "the queued captain message answered with the joined token as its own turn"
 AFTER_SEQ=$BEFORE_SEQ
 i=0
 while [ "$i" -lt 240 ]; do
